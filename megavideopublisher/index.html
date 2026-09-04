@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MegaVideoPublisher — one long video in, a month of posts out</title>
+<meta name="description" content="Self-hosted video pipeline: transcribe a long video, cut it into short clips, write the copy, and post them on a schedule across your channels. Open source, runs on your own machine.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0b0d'/><circle cx='16' cy='16' r='6' fill='%23ffb02e'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wdth,wght@75..125,400..900&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#08090b;
+    --panel:#0f1116;
+    --panel-2:#14171e;
+    --line:#20242e;
+    --line-hot:#2d323f;
+    --amber:#ffb02e;
+    --blue:#5b9dff;
+    --phos:#4ade80;
+    --text:#eceae5;
+    --dim:#8b90a0;
+    --display:"Anybody","Arial Narrow",sans-serif;
+    --body:"Instrument Sans",-apple-system,sans-serif;
+    --mono:"Spline Sans Mono",ui-monospace,monospace;
+    --gutter:clamp(1.25rem,4vw,4rem);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--ink); color:var(--text);
+    font-family:var(--body); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  /* Hairline engineering grid, faded off at the bottom, so the ground has
+     depth instead of being a flat fill. */
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background-image:
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:64px 64px;
+    opacity:.35;
+    mask-image:radial-gradient(ellipse 120% 80% at 50% 0%,#000 20%,transparent 75%);
+    -webkit-mask-image:radial-gradient(ellipse 120% 80% at 50% 0%,#000 20%,transparent 75%);
+  }
+  /* Grain. Large dark areas band badly on a phone without it. */
+  body::after{
+    content:""; position:fixed; inset:0; z-index:999; pointer-events:none; opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  main,header,footer{position:relative;z-index:1}
+  a{color:inherit}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 var(--gutter)}
+
+  .mono{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase}
+  .dim{color:var(--dim)}
+
+  /* ---------- nav ---------- */
+  header{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);
+    background:color-mix(in srgb,var(--ink) 82%,transparent);
+    border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;gap:1.5rem;height:60px}
+  .brand{display:flex;align-items:center;gap:.6rem;font-family:var(--display);
+    font-variation-settings:"wdth" 112,"wght" 800;font-size:.95rem;letter-spacing:.02em;
+    text-decoration:none;white-space:nowrap}
+  .led{width:8px;height:8px;border-radius:50%;background:var(--phos);
+    box-shadow:0 0 10px var(--phos);animation:pulse 2.6s ease-in-out infinite;flex:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.28}}
+  .nav-links{margin-left:auto;display:flex;gap:1.6rem}
+  .nav-links a{text-decoration:none;color:var(--dim);transition:color .2s}
+  .nav-links a:hover{color:var(--amber)}
+  @media(max-width:760px){.nav-links{display:none}}
+
+  /* ---------- hero ---------- */
+  /* padding-BLOCK, not the shorthand. `.hero` sits on the same element as
+     `.wrap`, so `padding: X 0 Y` overwrote the horizontal gutter with 0 --
+     which flushed the hero to the viewport edge on a phone and left it
+     misaligned with the header on a desktop. */
+  .hero{padding-block:clamp(3.5rem,11vh,7rem) clamp(2.5rem,7vh,4.5rem)}
+  /* Wraps. An inline-flex holding a long letter-spaced string sets a large
+     min-content width and pushed the whole hero past a 390px viewport. */
+  .eyebrow{display:inline-flex;flex-wrap:wrap;max-width:100%;align-items:center;gap:.6rem;color:var(--amber);
+    border:1px solid color-mix(in srgb,var(--amber) 35%,transparent);
+    padding:.34rem .75rem;border-radius:99px;
+    background:color-mix(in srgb,var(--amber) 8%,transparent)}
+  h1{
+    font-family:var(--display);
+    font-size:clamp(1.95rem,8.6vw,6.4rem);
+    line-height:.92; letter-spacing:-.02em; margin:1.5rem 0 0;
+    font-variation-settings:"wdth" 118,"wght" 850;
+    text-wrap:balance;
+  }
+  /* The width axis is the thing that overflows a phone, not the point size:
+     at wdth 118 a fourteen-character line is wider than 350px however small
+     the type gets. Narrow the face instead of shrinking it to nothing. */
+  @media(max-width:560px){
+    h1{font-variation-settings:"wdth" 96,"wght" 850}
+    .brand{font-variation-settings:"wdth" 100,"wght" 800}
+    .eyebrow{letter-spacing:.08em;font-size:.66rem}
+  }
+  h1 .thin{
+    display:block;
+    font-variation-settings:"wdth" 78,"wght" 300;
+    color:var(--dim); font-size:.52em; letter-spacing:.01em; margin-top:.35em;
+  }
+  h1 em{font-style:normal;color:var(--amber)}
+  .lede{max-width:46ch;margin:1.8rem 0 0;font-size:clamp(1rem,1.7vw,1.18rem);color:#c5c3bd}
+  .cta-row{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:2.2rem}
+  .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.78rem 1.3rem;
+    border-radius:6px;text-decoration:none;font-weight:600;font-size:.92rem;
+    border:1px solid var(--line-hot);transition:transform .18s,background .18s,border-color .18s}
+  .btn:hover{transform:translateY(-2px)}
+  .btn-a{background:var(--amber);color:#140d00;border-color:var(--amber)}
+  .btn-a:hover{background:#ffc257}
+  .btn-b{background:transparent;color:var(--text)}
+  .btn-b:hover{border-color:var(--amber);color:var(--amber)}
+
+  /* ---------- signal path ---------- */
+  .signal{margin-top:clamp(3rem,7vh,5rem);border:1px solid var(--line);
+    border-radius:10px;background:linear-gradient(180deg,var(--panel),#0b0d11);
+    padding:1.15rem 1.15rem 1rem;overflow:hidden}
+  .signal-head{display:flex;justify-content:space-between;align-items:center;
+    gap:1rem;margin-bottom:.4rem;flex-wrap:wrap}
+  .signal svg{width:100%;height:auto;display:block;min-width:0}
+  .stage-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+    text-transform:uppercase;fill:var(--dim)}
+  .stage-sub{font-family:var(--mono);font-size:8px;fill:#5a6070}
+
+  /* ---------- sections ---------- */
+  section{padding:clamp(3.5rem,9vh,6.5rem) 0;border-top:1px solid var(--line)}
+  /* A GRID, not a wrapping flexbox. With flex the note's position depended on
+     how long the heading happened to be -- it sat beside "What happens to a
+     video" and wrapped under "Eight ways to cut one source", stranding a hole.
+     Fixed columns put it in the same place in every section. */
+  .sec-head{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,28ch);
+    gap:.9rem 2rem;align-items:start;margin-bottom:2.5rem}
+  .sec-num{font-family:var(--mono);color:var(--amber);font-size:.72rem;letter-spacing:.16em;
+    padding-top:.62em}
+  h2{font-family:var(--display);font-variation-settings:"wdth" 112,"wght" 800;
+    font-size:clamp(1.65rem,4vw,2.7rem);line-height:1.02;margin:0;letter-spacing:-.015em;
+    text-wrap:balance}
+  .sec-note{margin:.35em 0 0;color:var(--dim);font-size:.9rem}
+  @media(max-width:900px){
+    .sec-head{grid-template-columns:auto minmax(0,1fr)}
+    .sec-note{grid-column:2;max-width:46ch}
+  }
+
+  /* ---------- format table ---------- */
+  .formats{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
+  .frow{display:grid;grid-template-columns:minmax(130px,1.1fr) 100px 1fr;gap:1rem;
+    padding:.95rem 1.15rem;border-bottom:1px solid var(--line);align-items:center;
+    transition:background .18s}
+  .frow:last-child{border-bottom:0}
+  .frow:hover{background:var(--panel-2)}
+  .frow.head{background:#0b0d11;color:var(--dim)}
+  .fname{font-family:var(--display);font-variation-settings:"wdth" 108,"wght" 700;font-size:1rem}
+  .flen{font-family:var(--mono);font-size:.78rem;color:var(--amber)}
+  .fdesc{color:var(--dim);font-size:.88rem}
+  @media(max-width:720px){
+    .frow{grid-template-columns:1fr auto;gap:.35rem .8rem}
+    .fdesc{grid-column:1/-1}
+    .frow.head{display:none}
+  }
+
+  /* ---------- calendar ---------- */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cal .day{border:1px solid var(--line);border-radius:7px;background:var(--panel);
+    padding:.55rem .5rem;min-height:132px}
+  .cal .dlabel{font-family:var(--mono);font-size:.62rem;color:#5a6070;letter-spacing:.1em;
+    text-transform:uppercase;margin-bottom:.5rem}
+  .slot{font-family:var(--mono);font-size:.62rem;padding:.28rem .38rem;border-radius:4px;
+    margin-bottom:4px;border-left:2px solid;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .s-short{background:color-mix(in srgb,var(--amber) 12%,transparent);
+    border-color:var(--amber);color:#ffcb72}
+  .s-long{background:color-mix(in srgb,var(--blue) 12%,transparent);
+    border-color:var(--blue);color:#a8c8ff}
+  .s-hold{background:#15181f;border-color:#3a4050;color:#6e7486}
+  @media(max-width:820px){
+    .cal{grid-template-columns:repeat(3,1fr)}
+    .cal .day:nth-child(n+7){display:none}
+  }
+  .legend{display:flex;gap:1.2rem;flex-wrap:wrap;margin-top:1rem}
+  .legend span{display:inline-flex;align-items:center;gap:.42rem}
+  .chip{width:9px;height:9px;border-radius:2px;flex:none}
+
+  /* ---------- rack modules ---------- */
+  /* The hairlines are drawn by each cell's own box-shadow, NOT by letting the
+     container's colour show through 1px gaps. With the gap trick, a row that
+     does not divide evenly leaves the container colour exposed as a pale
+     block -- eight modules in a three-column grid did exactly that. This way
+     an empty cell is just empty panel, whatever the count or the breakpoint. */
+  .rack{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:1px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .mod{background:var(--panel);padding:1.5rem 1.35rem;transition:background .22s;
+    box-shadow:0 0 0 1px var(--line)}
+  .mod:hover{background:var(--panel-2)}
+  .mod-top{display:flex;align-items:center;gap:.55rem;margin-bottom:.9rem}
+  .mod-led{width:6px;height:6px;border-radius:50%;background:var(--amber);
+    box-shadow:0 0 8px var(--amber);flex:none}
+  .mod h3{font-family:var(--display);font-variation-settings:"wdth" 106,"wght" 700;
+    font-size:1.02rem;margin:0 0 .5rem}
+  .mod p{margin:0;color:var(--dim);font-size:.89rem;line-height:1.55}
+  .mod ul{margin:.7rem 0 0;padding-left:1rem;color:var(--dim);font-size:.84rem}
+  .mod li{margin:.22rem 0}
+
+  /* ---------- stats ---------- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .stat{background:var(--panel);padding:1.5rem 1.3rem;box-shadow:0 0 0 1px var(--line)}
+  .stat b{display:block;font-family:var(--display);
+    font-variation-settings:"wdth" 120,"wght" 850;
+    font-size:clamp(1.9rem,4.4vw,2.9rem);line-height:1;color:var(--amber);
+    letter-spacing:-.02em}
+  .stat span{display:block;margin-top:.5rem;color:var(--dim);font-size:.85rem}
+
+  /* ---------- honest box ---------- */
+  .note{border:1px solid var(--line);border-left:3px solid var(--amber);
+    border-radius:0 8px 8px 0;background:var(--panel);padding:1.35rem 1.5rem;margin-top:2rem}
+  .note p{margin:.85rem 0 0;color:var(--dim);font-size:.92rem}
+  .note p:first-of-type{margin-top:0}
+  .note strong{color:var(--text)}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);padding:3rem 0 4rem;color:var(--dim);font-size:.87rem}
+  .fgrid{display:flex;gap:2rem;flex-wrap:wrap;align-items:flex-start}
+  .fgrid nav{display:flex;gap:1.3rem;margin-left:auto;flex-wrap:wrap}
+  footer a{color:var(--dim);text-decoration:none;transition:color .2s}
+  footer a:hover{color:var(--amber)}
+  @media(max-width:640px){.fgrid nav{margin-left:0}}
+
+  /* ---------- motion ---------- */
+  .rise{opacity:0;transform:translateY(20px);
+    transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
+  .rise.in{opacity:1;transform:none}
+  .hero .rise{transition-delay:calc(var(--i,0) * 90ms)}
+  @media(prefers-reduced-motion:reduce){
+    .rise{opacity:1;transform:none;transition:none}
+    .led,.mod-led{animation:none}
+    #packet{display:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><span class="led"></span>MEGAVIDEOPUBLISHER</a>
+    <nav class="nav-links mono" aria-label="Sections">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#formats">Formats</a>
+      <a href="#schedule">Schedule</a>
+      <a href="#features">Features</a>
+      <a href="#selfhost">Self-host</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <div class="wrap hero">
+    <span class="eyebrow mono rise in" style="--i:0"><span class="led"></span>Self-hosted · personal licence · runs on your machine</span>
+    <h1 class="rise in" style="--i:1">
+      One long video in.<em> A month</em> of posts out.
+      <span class="thin">The pipeline runs while you don't.</span>
+    </h1>
+    <p class="lede rise in" style="--i:2">
+      MegaVideoPublisher transcribes a long video, finds the moments worth
+      keeping, renders them as captioned vertical clips, writes each one's title
+      and description, and posts them on your channels' own calendars — for
+      weeks, without being asked again.
+    </p>
+    <div class="cta-row rise in" style="--i:3">
+      <a class="btn btn-a" href="#pipeline">See how it works</a>
+      <a class="btn btn-b" href="mailto:adud3k93@gmail.com?subject=MegaVideoPublisher%20licence">Request a licence</a>
+    </div>
+
+    <div class="signal rise in" style="--i:4">
+      <div class="signal-head">
+        <span class="mono dim">Signal path</span>
+        <span class="mono" style="color:var(--phos)">● processing</span>
+      </div>
+      <svg viewBox="0 0 1000 118" role="img" aria-label="Pipeline stages: ingest, transcribe, select, render, copy, schedule, publish">
+        <defs>
+          <linearGradient id="wire" x1="0" x2="1">
+            <stop offset="0" stop-color="#2d323f"/>
+            <stop offset=".5" stop-color="#454c5e"/>
+            <stop offset="1" stop-color="#2d323f"/>
+          </linearGradient>
+          <filter id="glow"><feGaussianBlur stdDeviation="3.2" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <path id="track" d="M40 44 H960" stroke="url(#wire)" stroke-width="1.5" fill="none"/>
+        <g id="nodes"></g>
+        <circle id="packet" r="4.5" fill="#ffb02e" filter="url(#glow)">
+          <animateMotion dur="7s" repeatCount="indefinite" calcMode="linear">
+            <mpath href="#track"/>
+          </animateMotion>
+        </circle>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ============ PIPELINE ============ -->
+  <section id="pipeline">
+    <div class="wrap">
+      <div class="sec-head rise">
+        <span class="sec-num">01</span>
+        <h2>What happens to a video</h2>
+        <p class="sec-note">Every stage writes down what it paid for. A closed
+          laptop or a restarted worker costs the step it was on — never the
+          whole run.</p>
+      </div>
+
+      <div class="rack rise">
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 01</span></div>
+          <h3>Ingest</h3>
+          <p>A YouTube link or an uploaded file. Sources up to twelve and a half
+             hours; anything past the transcriber's own ceiling is split into
+             pieces and stitched back together in source time.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 02</span></div>
+          <h3>Transcribe</h3>
+          <p>Word-level timestamps, cached to disk. A re-run never pays for the
+             same audio twice — and a source with no speech is recognised as a
+             fact about the file rather than retried for two days.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 03</span></div>
+          <h3>Select</h3>
+          <p>A model reads the transcript and proposes segments, each scored for
+             hook, engagement, value and shareability. How many it picks scales
+             with the runtime instead of being a fixed number.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 04</span></div>
+          <h3>Render</h3>
+          <p>Vertical 9:16, with the speaker kept in frame by face tracking — and
+             the whole frame fitted instead when there is no face to track,
+             because cropping on no evidence throws the shot away.</p>
+          <ul>
+            <li>Word-synced captions, cut on silences</li>
+            <li>A hook title in the top safe area</li>
+            <li>Logo, intro and outro stings</li>
+            <li>B-roll, transitions, caption templates</li>
+          </ul>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 05</span></div>
+          <h3>Write the copy</h3>
+          <p>Each clip gets its own title, description and hashtags from its own
+             transcript — short-form copy for a Short, a full description for
+             long-form, always naming the source it came from.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Stage 06</span></div>
+          <h3>Queue &amp; publish</h3>
+          <p>Finished clips land on the target channel's posting calendar and go
+             out at their slot — through a browser agent driving a publishing
+             tool, or straight through the platform's own API.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FORMATS ============ -->
+  <section id="formats">
+    <div class="wrap">
+      <div class="sec-head rise">
+        <span class="sec-num">02</span>
+        <h2>Eight ways to cut one source</h2>
+        <p class="sec-note">Some formats extract a range of the source. Others
+          compose something new around it.</p>
+      </div>
+
+      <div class="formats rise">
+        <div class="frow head mono"><span>Format</span><span>Length</span><span>What it is</span></div>
+        <div class="frow"><span class="fname">Clips</span><span class="flen">15–60s</span>
+          <span class="fdesc">The classic short — the strongest contiguous moments, vertical and captioned.</span></div>
+        <div class="frow"><span class="fname">Shorts</span><span class="flen">under 60s</span>
+          <span class="fdesc">Tuned for the Shorts shelf: the hook lands in the first seconds.</span></div>
+        <div class="frow"><span class="fname">Longers</span><span class="flen">3–10m</span>
+          <span class="fdesc">A whole segment rather than a moment, for channels that keep people longer.</span></div>
+        <div class="frow"><span class="fname">Longs</span><span class="flen">10m+</span>
+          <span class="fdesc">Full-length cuts with chapter marks and a written-out description.</span></div>
+        <div class="frow"><span class="fname">Watch-alongs</span><span class="flen">45s–90m</span>
+          <span class="fdesc">The source kept whole, with a narrated persona reacting through it.</span></div>
+        <div class="frow"><span class="fname">Reviews</span><span class="flen">5–30m</span>
+          <span class="fdesc">Many moments interwoven with original commentary, argued into an order.</span></div>
+        <div class="frow"><span class="fname">Compilations</span><span class="flen">you set it</span>
+          <span class="fdesc">Ten to a hundred videos, title cards between them, timestamps in the description.</span></div>
+        <div class="frow"><span class="fname">Evergreen</span><span class="flen">a rotation</span>
+          <span class="fdesc">A fixed corpus split on sentence boundaries and broadcast on a loop for months.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCHEDULE ============ -->
+  <section id="schedule">
+    <div class="wrap">
+      <div class="sec-head rise">
+        <span class="sec-num">03</span>
+        <h2>A posting calendar, not a queue</h2>
+        <p class="sec-note">Each channel keeps its own timetable in its own
+          timezone, with short-form and long-form on separate rhythms.</p>
+      </div>
+
+      <div class="rise">
+        <div class="cal" id="cal"></div>
+        <div class="legend mono dim">
+          <span><i class="chip" style="background:var(--amber)"></i>Short-form slot</span>
+          <span><i class="chip" style="background:var(--blue)"></i>Long-form slot</span>
+          <span><i class="chip" style="background:#3a4050"></i>Held — not claimable until released</span>
+        </div>
+      </div>
+
+      <div class="rack rise" style="margin-top:2.5rem">
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Cadence</span></div>
+          <h3>Times you set, kept exactly</h3>
+          <p>Posts per day, the times themselves, a minimum gap enforced within
+             each format class, and veto windows where nothing may go out.
+             Daylight saving is handled by converting once, in the right
+             direction.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Repair</span></div>
+          <h3>A missed slot doesn't stop the queue</h3>
+          <p>The oldest item is claimed first, so one slot stuck in the past
+             blocks everything behind it. A sweep re-anchors stale slots onto the
+             channel's own calendar — never "post it all now".</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Safety</span></div>
+          <h3>Inert until you say otherwise</h3>
+          <p>A channel starts with publishing off and every item held. Nothing
+             reaches a real account until an operator switches both on
+             deliberately.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head rise">
+        <span class="sec-num">04</span>
+        <h2>The rest of the rack</h2>
+        <p class="sec-note">Everything the pipeline grew once it started running
+          unattended.</p>
+      </div>
+
+      <div class="rack rise">
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Watch</span></div>
+          <h3>Watched channels</h3>
+          <p>Follow a channel and turn what it publishes into clips
+             automatically. Filter by duration band and by title, in whole words
+             and accent-insensitively — so "trailer" matches an official trailer
+             and "art" does not match "Start".</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Voice</span></div>
+          <h3>Personas &amp; narration</h3>
+          <p>Commentary is written and spoken in a persona you define — a
+             register, a language and a voice. Cloud voices, a cloned voice, or
+             local synthesis where nothing leaves the machine.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Look</span></div>
+          <h3>Channel designs</h3>
+          <p>One palette, typeface and caption style per channel, read by both
+             renderers — so an opening card and the captions four seconds later
+             cannot disagree about what the channel looks like.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Lang</span></div>
+          <h3>Languages that actually render</h3>
+          <p>Fonts are checked for coverage before a render, not after. A
+             typeface that cannot draw <span style="color:var(--text)">ą ć ę ł ń</span>
+             is swapped for one that can, matched by weight so a poster face is
+             replaced by a poster face.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Data</span></div>
+          <h3>Analytics that answer a question</h3>
+          <p>Runway — how many days each channel keeps posting before it runs
+             dry. Output by template with average virality. A source library
+             showing which links have been cut, and into which formats.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Again</span></div>
+          <h3>Reposting</h3>
+          <p>Rank what already published by a score you weight yourself, then
+             send the best of it round again on the same calendar.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Resume</span></div>
+          <h3>Nothing paid for twice</h3>
+          <p>Downloads, transcripts, model answers, narration and finished
+             renders are all cached by content. A clip is named after what it is,
+             so a re-run lands on the same file instead of a second copy beside
+             the first.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">Keep</span></div>
+          <h3>A library of the good ones</h3>
+          <p>Mark a clip worth keeping and it is copied into a folder you can
+             actually open, named after the source and its hook rather than a
+             hash — and the mark protects the file from the cleanup that runs
+             once a clip has published.</p>
+        </div>
+        <div class="mod">
+          <div class="mod-top"><span class="mod-led"></span><span class="mono dim">API</span></div>
+          <h3>Driveable from outside</h3>
+          <p>A REST API with per-user keys, and an MCP server so an assistant can
+             start a job, watch it, and fetch the clips when it finishes.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SELF-HOST ============ -->
+  <section id="selfhost">
+    <div class="wrap">
+      <div class="sec-head rise">
+        <span class="sec-num">05</span>
+        <h2>It runs on your machine</h2>
+        <p class="sec-note">There is no hosted service and no account. You
+          install it, and it works with your material and your accounts.</p>
+      </div>
+
+      <div class="stats rise">
+        <div class="stat"><b>6</b><span>containers: web, API, worker, queue, database, publisher</span></div>
+        <div class="stat"><b>0</b><span>data sent to the authors — no telemetry, no analytics</span></div>
+        <div class="stat"><b>12.5h</b><span>longest source the render pipeline accepts</span></div>
+        <div class="stat"><b>Ask</b><span>personal licences by request — it is not open source</span></div>
+      </div>
+
+      <div class="note rise">
+        <p><strong>It is not open source.</strong> MegaVideoPublisher is
+          proprietary, and running it needs a licence. Personal licences are
+          granted on request — <a href="mailto:adud3k93@gmail.com?subject=MegaVideoPublisher%20licence" style="color:var(--amber)">get in
+          touch</a> and say what you want to use it for.</p>
+        <p><strong>Bring your own keys.</strong> Transcription and the language
+          model are services you configure with your own credentials. What it
+          costs to run is between you and those providers.</p>
+        <p><strong>Publish only what you have the right to publish.</strong> The
+          tool does not decide that for you. Formats built on someone else's
+          material report how much of the result is genuinely yours, and refuse
+          to render below the floor you set.</p>
+        <p><strong>Your accounts stay yours.</strong> Connecting a channel stores
+          its token on your own machine and uses it for nothing but posting your
+          clips to that channel. Revoke it at any time and it stops.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap fgrid">
+    <div>
+      <div class="brand" style="margin-bottom:.5rem"><span class="led"></span>MEGAVIDEOPUBLISHER</div>
+      <div class="mono dim">Self-hosted video publishing · Personal licence by request</div>
+    </div>
+    <nav class="mono" aria-label="Legal and source">
+      <a href="./privacy.html">Privacy policy</a>
+      <a href="./terms.html">Terms of service</a>
+      <a href="mailto:adud3k93@gmail.com?subject=MegaVideoPublisher%20licence">Request a licence</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgEl(name, attrs, text) {
+  const el = document.createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+// Signal-path nodes, drawn from data so the labels and the wire cannot drift
+// apart -- adding a stage is one array entry rather than four <text> tags.
+(function drawSignalPath() {
+  const stages = [
+    ["Ingest", "yt-dlp / upload"],
+    ["Transcribe", "word timings"],
+    ["Select", "scored segments"],
+    ["Render", "9:16 + captions"],
+    ["Copy", "title / tags"],
+    ["Schedule", "channel calendar"],
+    ["Publish", "agent or API"],
+  ];
+  const g = document.getElementById("nodes");
+  if (!g) return;
+  const x0 = 40, x1 = 960, step = (x1 - x0) / (stages.length - 1);
+  stages.forEach(([name, sub], i) => {
+    const x = x0 + step * i;
+    const lit = i === 0;
+    g.appendChild(svgEl("circle", {
+      cx: x, cy: 44, r: 7, fill: "#0f1116",
+      stroke: lit ? "#ffb02e" : "#3a4050", "stroke-width": 1.5,
+    }));
+    g.appendChild(svgEl("circle", {
+      cx: x, cy: 44, r: 2, fill: lit ? "#ffb02e" : "#565d70",
+    }));
+    g.appendChild(svgEl("text", {
+      x: x, y: 76, "text-anchor": "middle", class: "stage-label",
+    }, name));
+    g.appendChild(svgEl("text", {
+      x: x, y: 90, "text-anchor": "middle", class: "stage-sub",
+    }, sub));
+  });
+})();
+
+// A week of one channel's calendar. Illustrative, and shaped like what the app
+// actually allocates: short-form on its own rhythm, long-form on another, and a
+// held item that will not go out until somebody releases it.
+(function drawCalendar() {
+  const cal = document.getElementById("cal");
+  if (!cal) return;
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const plan = [
+    [["09:30", "short"], ["14:00", "short"], ["19:30", "short"]],
+    [["09:30", "short"], ["14:00", "short"], ["19:30", "short"], ["20:00", "long"]],
+    [["09:30", "short"], ["14:00", "short"], ["19:30", "short"]],
+    [["09:30", "short"], ["14:00", "hold"], ["19:30", "short"]],
+    [["09:30", "short"], ["14:00", "short"], ["19:30", "short"], ["20:00", "long"]],
+    [["11:00", "short"], ["18:00", "short"]],
+    [["11:00", "short"], ["18:00", "short"]],
+  ];
+  const cls = { short: "s-short", long: "s-long", hold: "s-hold" };
+  const tag = { short: "clip", long: "longer", hold: "held" };
+
+  days.forEach((name, i) => {
+    const day = document.createElement("div");
+    day.className = "day";
+    const label = document.createElement("div");
+    label.className = "dlabel";
+    label.textContent = name;
+    day.appendChild(label);
+    plan[i].forEach(([time, kind]) => {
+      const slot = document.createElement("div");
+      slot.className = "slot " + cls[kind];
+      slot.textContent = time + " " + tag[kind];
+      day.appendChild(slot);
+    });
+    cal.appendChild(day);
+  });
+})();
+
+// Reveal on scroll. One observer that unobserves as it goes, so a long page
+// does not keep a callback alive per element.
+(function revealOnScroll() {
+  const items = document.querySelectorAll(".rise:not(.in)");
+  if (!("IntersectionObserver" in window)) {
+    items.forEach((el) => el.classList.add("in"));
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("in");
+      io.unobserve(entry.target);
+    });
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.05 });
+  items.forEach((el) => io.observe(el));
+})();
+</script>
+</body>
+</html>
