@@ -26,6 +26,20 @@ FONTS = (
     "&family=Figtree:wght@400;500;600"
     "&family=IBM+Plex+Mono:wght@400;500&display=swap"
 )
+# Ten sam kontener co w ręcznie pisanych landingach (oddech, flow, emocjonalna, tylko luz).
+GTM_ID = "GTM-P4CSLTC9"
+GTM_HEAD = f"""<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':
+new Date().getTime(),event:'gtm.js'}});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+}})(window,document,'script','dataLayer','{GTM_ID}');</script>
+<!-- End Google Tag Manager -->"""
+GTM_BODY = f"""<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id={GTM_ID}"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->"""
+
 FAVICON = (
     "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
     "<rect width='32' height='32' rx='8' fill='%2316211F'/>"
@@ -46,6 +60,7 @@ def head(title, description, canonical, image=None, extra=""):
     return f"""<!doctype html>
 <html lang="pl">
 <head>
+{GTM_HEAD}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)}</title>
@@ -154,6 +169,7 @@ def build_index():
     page = f"""{head('Sati Heart Space – praktyki na stres, sen i koncentrację | Aleksander Dudek',
                desc, SITE + '/', '/assets/img/reset-kortyzolu.webp')}
 <body class="page-home">
+{GTM_BODY}
 {masthead(False)}
 <main>
   <section class="hero" aria-labelledby="hero-title">
@@ -265,6 +281,7 @@ def build_product(p):
     title = f'{p["name"]} – {p["kind"].lower()} | Aleksander Dudek'
     page = f"""{head(title, html.unescape(p['card']), url, img_url(p), product_ld(p))}
 <body class="page-product">
+{GTM_BODY}
 {masthead(True)}
 <main>
   <section class="phero">
